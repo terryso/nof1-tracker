@@ -156,96 +156,148 @@ export class BinanceService {
   }
 
   /**
+   * Get quantity and price precision from Binance API
+   */
+  private async getPrecisions(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number; minQty: number; stepSize: number }> {
+    try {
+      const symbolInfo = await this.getSymbolInfo(symbol);
+
+      // Get LOT_SIZE filter for quantity precision
+      const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+      // Get PRICE_FILTER for price precision
+      const priceFilter = symbolInfo.filters.find((f: any) => f.filterType === 'PRICE_FILTER');
+
+      const minQty = parseFloat(lotSizeFilter.minQty || '0.001');
+      const stepSize = parseFloat(lotSizeFilter.stepSize || '0.001');
+
+      // Calculate precision from step size
+      // For example: stepSize = 0.001 -> precision = 3
+      const quantityPrecision = stepSize < 1
+        ? stepSize.toString().split('.')[1]?.length || 0
+        : 0;
+
+      // Get price precision from tickSize
+      const tickSize = parseFloat(priceFilter.tickSize || '0.01');
+      const pricePrecision = tickSize < 1
+        ? tickSize.toString().split('.')[1]?.length || 2
+        : 0;
+
+      return { quantityPrecision, pricePrecision, minQty, stepSize };
+    } catch (error) {
+      console.warn(`⚠️ Failed to get precision from API for ${symbol}, using defaults: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      // Return default values
+      return {
+        quantityPrecision: 3,
+        pricePrecision: 2,
+        minQty: 0.001,
+        stepSize: 0.001
+      };
+    }
+  }
+
+  /**
    * Format quantity precision based on symbol
    */
-  public formatQuantity(quantity: number | string, symbol: string): string {
+  public async formatQuantityAsync(quantity: number | string, symbol: string): Promise<string> {
     const baseSymbol = this.convertSymbol(symbol);
-
-    // Updated precision map based on actual Binance futures API specifications
-    const precisionMap: Record<string, number> = {
-      'BTCUSDT': 3,      // BTC futures: 3 decimal places (min 0.001, step 0.001)
-      'ETHUSDT': 3,      // ETH futures: 3 decimal places (min 0.001, step 0.001)
-      'BNBUSDT': 2,      // BNB futures: 2 decimal places (min 0.01, step 0.01)
-      'XRPUSDT': 1,      // XRP futures: 1 decimal place (min 0.1, step 0.1)
-      'ADAUSDT': 0,      // ADA futures: 0 decimal places (min 1, step 1)
-      'DOGEUSDT': 0,     // DOGE futures: 0 decimal places (min 1, step 1)
-      'SOLUSDT': 2,      // SOL futures: 2 decimal places (min 0.01, step 0.01)
-      'AVAXUSDT': 2,     // AVAX futures: 2 decimal places (min 0.01, step 0.01)
-      'MATICUSDT': 1,    // MATIC futures: 1 decimal place (min 0.1, step 0.1)
-      'DOTUSDT': 2,      // DOT futures: 2 decimal places (min 0.01, step 0.01)
-      'LINKUSDT': 2,     // LINK futures: 2 decimal places (min 0.01, step 0.01)
-      'UNIUSDT': 2,      // UNI futures: 2 decimal places (min 0.01, step 0.01)
-    };
-
-    const precision = precisionMap[baseSymbol] || 3; // Default to 3 decimal places
+    const { quantityPrecision, minQty, stepSize } = await this.getPrecisions(baseSymbol);
 
     // Convert to number if it's a string
     const quantityNum = typeof quantity === 'string' ? parseFloat(quantity) : quantity;
 
-    // Define minimum quantities based on actual Binance futures API specifications
-    const minQtyMap: Record<string, number> = {
-      'BTCUSDT': 0.001,     // BTC futures min: 0.001
-      'ETHUSDT': 0.001,     // ETH futures min: 0.001
-      'BNBUSDT': 0.01,      // BNB futures min: 0.01
-      'XRPUSDT': 0.1,       // XRP futures min: 0.1
-      'ADAUSDT': 1,         // ADA futures min: 1
-      'DOGEUSDT': 10,       // DOGE futures min: 10
-      'SOLUSDT': 0.01,      // SOL futures min: 0.01
-      'AVAXUSDT': 0.01,     // AVAX futures min: 0.01
-      'MATICUSDT': 0.1,     // MATIC futures min: 0.1
-      'DOTUSDT': 0.01,      // DOT futures min: 0.01
-      'LINKUSDT': 0.01,     // LINK futures min: 0.01
-      'UNIUSDT': 0.01,      // UNI futures min: 0.01
-    };
-
-    const minQty = minQtyMap[baseSymbol] || 0.001;
-
     // If quantity is too small, return minimum quantity
     if (quantityNum < minQty && quantityNum > 0) {
-      console.warn(`Quantity ${quantityNum} is below minimum ${minQty} for ${baseSymbol}, using minimum`);
+      console.warn(`⚠️ Quantity ${quantityNum} is below minimum ${minQty} for ${baseSymbol}, using minimum`);
       return minQty.toString();
     }
 
-    // Round to nearest valid step size
-    const stepSize = minQty; // Use minQty as step size for simplicity
+    // Round down to nearest valid step size
     const roundedQuantity = Math.floor(quantityNum / stepSize) * stepSize;
 
     // Ensure we don't go below minimum
     const finalQuantity = Math.max(roundedQuantity, minQty);
 
     // Format to correct precision - keep trailing zeros for precision requirements
-    const formattedQuantity = finalQuantity.toFixed(precision);
+    const formattedQuantity = finalQuantity.toFixed(quantityPrecision);
     return formattedQuantity;
   }
 
   /**
-   * Format price precision based on symbol
+   * Format quantity precision based on symbol (synchronous fallback)
+   * This method tries to use cached symbol info or falls back to hardcoded values
+   */
+  public formatQuantity(quantity: number | string, symbol: string): string {
+    const baseSymbol = this.convertSymbol(symbol);
+
+    // Check cache first
+    let quantityPrecision = 3;
+    let minQty = 0.001;
+    let stepSize = 0.001;
+
+    if (this.symbolInfoCache.has(baseSymbol)) {
+      const symbolInfo = this.symbolInfoCache.get(baseSymbol);
+      const lotSizeFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+
+      if (lotSizeFilter) {
+        minQty = parseFloat(lotSizeFilter.minQty || '0.001');
+        stepSize = parseFloat(lotSizeFilter.stepSize || '0.001');
+        quantityPrecision = stepSize < 1
+          ? stepSize.toString().split('.')[1]?.length || 0
+          : 0;
+      }
+    }
+
+    // Convert to number if it's a string
+    const quantityNum = typeof quantity === 'string' ? parseFloat(quantity) : quantity;
+
+    // If quantity is too small, return minimum quantity
+    if (quantityNum < minQty && quantityNum > 0) {
+      console.warn(`⚠️ Quantity ${quantityNum} is below minimum ${minQty} for ${baseSymbol}, using minimum`);
+      return minQty.toString();
+    }
+
+    // Round down to nearest valid step size
+    const roundedQuantity = Math.floor(quantityNum / stepSize) * stepSize;
+
+    // Ensure we don't go below minimum
+    const finalQuantity = Math.max(roundedQuantity, minQty);
+
+    // Format to correct precision - keep trailing zeros for precision requirements
+    const formattedQuantity = finalQuantity.toFixed(quantityPrecision);
+    return formattedQuantity;
+  }
+
+  /**
+   * Format price precision based on symbol (synchronous version with cache support)
    */
   public formatPrice(price: number | string, symbol: string): string {
     const baseSymbol = this.convertSymbol(symbol);
 
-    // Price precision map for stop prices and regular prices
-    const pricePrecisionMap: Record<string, number> = {
-      'BTCUSDT': 1,      // BTC: 1 decimal place for prices
-      'ETHUSDT': 2,      // ETH: 2 decimal places for prices
-      'BNBUSDT': 2,      // BNB: 2 decimal places for prices
-      'ADAUSDT': 4,      // ADA: 4 decimal places for prices
-      'DOGEUSDT': 5,     // DOGE: 5 decimal places for prices
-      'SOLUSDT': 2,      // SOL: 2 decimal places for prices
-      'AVAXUSDT': 2,     // AVAX: 2 decimal places for prices
-      'MATICUSDT': 3,    // MATIC: 3 decimal places for prices
-      'DOTUSDT': 2,      // DOT: 2 decimal places for prices
-      'LINKUSDT': 2,     // LINK: 2 decimal places for prices
-      'UNIUSDT': 2,      // UNI: 2 decimal places for prices
-    };
+    // Check cache first
+    let pricePrecision = 2;
+    let tickSize = 0.01;
 
-    const precision = pricePrecisionMap[baseSymbol] || 2; // Default to 2 decimal places for prices
+    if (this.symbolInfoCache.has(baseSymbol)) {
+      const symbolInfo = this.symbolInfoCache.get(baseSymbol);
+      const priceFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'PRICE_FILTER');
+
+      if (priceFilter) {
+        tickSize = parseFloat(priceFilter.tickSize || '0.01');
+        pricePrecision = tickSize < 1
+          ? tickSize.toString().split('.')[1]?.length || 2
+          : 0;
+      }
+    }
 
     // Convert to number if it's a string
     const priceNum = typeof price === 'string' ? parseFloat(price) : price;
 
+    // Round to nearest tick size
+    const roundedPrice = Math.round(priceNum / tickSize) * tickSize;
+
     // Format to correct precision - keep trailing zeros for precision requirements
-    const formattedPrice = priceNum.toFixed(precision);
+    const formattedPrice = roundedPrice.toFixed(pricePrecision);
     return formattedPrice;
   }
 
@@ -485,15 +537,30 @@ export class BinanceService {
    * 下单
    */
   async placeOrder(order: BinanceOrder): Promise<OrderResponse> {
+    const baseSymbol = this.convertSymbol(order.symbol);
+
+    // 确保符号信息已加载到缓存中（避免精度错误）
+    if (!this.symbolInfoCache.has(baseSymbol)) {
+      console.log(`📥 Loading symbol info for ${baseSymbol}...`);
+      await this.getSymbolInfo(baseSymbol);
+    }
+
     const params: Record<string, any> = {
-      symbol: this.convertSymbol(order.symbol),
+      symbol: baseSymbol,
       side: order.side,
       type: order.type,
     };
 
     // 如果使用 closePosition，则不需要 quantity
     if (order.closePosition !== "true") {
-      params.quantity = this.formatQuantity(order.quantity, order.symbol);
+      const formattedQuantity = this.formatQuantity(order.quantity, order.symbol);
+      params.quantity = formattedQuantity;
+
+      // 调试信息：显示格式化的数量
+      const symbolInfo = this.symbolInfoCache.get(baseSymbol);
+      const lotSizeFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+      console.log(`📊 Quantity formatting: ${order.quantity} -> ${formattedQuantity}`);
+      console.log(`   Step size: ${lotSizeFilter?.stepSize || 'N/A'}, Min Qty: ${lotSizeFilter?.minQty || 'N/A'}`);
     }
 
     if (order.price) params.price = this.formatPrice(order.price, order.symbol);
