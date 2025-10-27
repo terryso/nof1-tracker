@@ -8,7 +8,8 @@ import {
   handleStatusCommand,
   handleProfitCommand,
   ProfitCommandOptions,
-  handleTelegramCommand
+  handleTelegramCommand,
+  handleSlackCommand
 } from './commands';
 import { handleError, getVersion } from './utils/command-helpers';
 
@@ -72,6 +73,17 @@ program
     }
   });
 
+program
+  .command('slack-test')
+  .description('Send a test Slack message')
+  .action(async (options) => {
+    try {
+      await handleSlackCommand(options);
+    } catch (error) {
+      handleError(error, 'Failed to send test Slack message');
+    }
+  });
+  
 // Status command
 program
   .command('status')

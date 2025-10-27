@@ -6,6 +6,11 @@ export interface TradingConfig {
     token: string;
     chatId: string;
   }
+  slack: {
+    enabled: boolean;
+    token: string;
+    channel: string;
+  }
 }
 
 export class ConfigManager {
@@ -19,6 +24,11 @@ export class ConfigManager {
         enabled: false,
         token: "",
         chatId: "",
+      },
+      slack: {
+        enabled: false,
+        token: "",
+        channel: "",
       }
     };
   }
@@ -61,6 +71,14 @@ export class ConfigManager {
     };
   }
 
+  setSlackConfig(enabled: boolean, token: string, channel: string): void {
+    this.config.slack = {
+      enabled,
+      token,
+      channel,
+    };
+  }
+
   /**
    * 从环境变量加载配置
    */
@@ -93,6 +111,15 @@ export class ConfigManager {
     if (telegramEnabled && telegramToken && telegramChatId) {
       this.setTelegramConfig(telegramEnabled, telegramToken, telegramChatId);
     }
+
+    const slackEnabled = process.env.SLACK_ENABLED === 'true';
+    const slackToken = process.env.SLACK_OAUTH_TOKEN || '';
+    const slackChannel = process.env.SLACK_CHANNEL_NAME || '';
+    
+    if (slackEnabled && slackToken && slackChannel) {
+      this.setSlackConfig(slackEnabled, slackToken, slackChannel);
+    }
+
   }
 
   /**
@@ -102,7 +129,8 @@ export class ConfigManager {
     return {
       ...this.config,
       symbolTolerances: { ...this.config.symbolTolerances },
-      telegram: { ...this.config.telegram }
+      telegram: { ...this.config.telegram },
+      slack: { ...this.config.slack }
     };
   }
 
@@ -123,6 +151,10 @@ export class ConfigManager {
     if (config.telegram) {
       this.setTelegramConfig(config.telegram.enabled, config.telegram.token, config.telegram.chatId);
     }
+
+    if (config.slack) {
+      this.setSlackConfig(config.slack.enabled, config.slack.token, config.slack.channel);
+    }
   }
 
   /**
@@ -136,6 +168,11 @@ export class ConfigManager {
         enabled: false,
         token: "",
         chatId: "",
+      },
+      slack: {
+        enabled: false,
+        token: "",
+        channel: "",
       }
     };
   }
