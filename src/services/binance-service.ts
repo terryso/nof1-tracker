@@ -246,6 +246,41 @@ export class BinanceService {
           ? stepSize.toString().split('.')[1]?.length || 0
           : 0;
       }
+    } else {
+      // Fallback to hardcoded precision and min quantity maps for backward compatibility
+      const precisionMap: Record<string, number> = {
+        'BTCUSDT': 3,      // BTC futures: 3 decimal places (min 0.001, step 0.001)
+        'ETHUSDT': 3,      // ETH futures: 3 decimal places (min 0.001, step 0.001)
+        'BNBUSDT': 2,      // BNB futures: 2 decimal places (min 0.01, step 0.01)
+        'XRPUSDT': 1,      // XRP futures: 1 decimal place (min 0.1, step 0.1)
+        'ADAUSDT': 0,      // ADA futures: 0 decimal places (min 1, step 1)
+        'DOGEUSDT': 0,     // DOGE futures: 0 decimal places (min 10, step 10)
+        'SOLUSDT': 2,      // SOL futures: 2 decimal places (min 0.01, step 0.01)
+        'AVAXUSDT': 2,     // AVAX futures: 2 decimal places (min 0.01, step 0.01)
+        'MATICUSDT': 1,    // MATIC futures: 1 decimal place (min 0.1, step 0.1)
+        'DOTUSDT': 2,      // DOT futures: 2 decimal places (min 0.01, step 0.01)
+        'LINKUSDT': 2,     // LINK futures: 2 decimal places (min 0.01, step 0.01)
+        'UNIUSDT': 2,      // UNI futures: 2 decimal places (min 0.01, step 0.01)
+      };
+
+      const minQtyMap: Record<string, number> = {
+        'BTCUSDT': 0.001,     // BTC futures min: 0.001
+        'ETHUSDT': 0.001,     // ETH futures min: 0.001
+        'BNBUSDT': 0.01,      // BNB futures min: 0.01
+        'XRPUSDT': 0.1,       // XRP futures min: 0.1
+        'ADAUSDT': 1,         // ADA futures min: 1
+        'DOGEUSDT': 10,       // DOGE futures min: 10
+        'SOLUSDT': 0.01,      // SOL futures min: 0.01
+        'AVAXUSDT': 0.01,     // AVAX futures min: 0.01
+        'MATICUSDT': 0.1,     // MATIC futures min: 0.1
+        'DOTUSDT': 0.01,      // DOT futures min: 0.01
+        'LINKUSDT': 0.01,     // LINK futures min: 0.01
+        'UNIUSDT': 0.01,      // UNI futures min: 0.01
+      };
+
+      quantityPrecision = precisionMap[baseSymbol] ?? 3;
+      minQty = minQtyMap[baseSymbol] ?? 0.001;
+      stepSize = minQty;
     }
 
     // Convert to number if it's a string
@@ -254,7 +289,7 @@ export class BinanceService {
     // If quantity is too small, return minimum quantity
     if (quantityNum < minQty && quantityNum > 0) {
       console.warn(`⚠️ Quantity ${quantityNum} is below minimum ${minQty} for ${baseSymbol}, using minimum`);
-      return minQty.toString();
+      return minQty.toFixed(quantityPrecision);
     }
 
     // Round down to nearest valid step size
@@ -288,6 +323,30 @@ export class BinanceService {
           ? tickSize.toString().split('.')[1]?.length || 2
           : 0;
       }
+    } else {
+      // Fallback to hardcoded precision map for backward compatibility
+      const pricePrecisionMap: Record<string, number> = {
+        'BTCUSDT': 1,      // BTC: 1 decimal place for prices
+        'ETHUSDT': 2,      // ETH: 2 decimal places for prices
+        'BNBUSDT': 2,      // BNB: 2 decimal places for prices
+        'ADAUSDT': 4,      // ADA: 4 decimal places for prices
+        'DOGEUSDT': 5,     // DOGE: 5 decimal places for prices
+        'SOLUSDT': 2,      // SOL: 2 decimal places for prices
+        'AVAXUSDT': 2,     // AVAX: 2 decimal places for prices
+        'MATICUSDT': 3,    // MATIC: 3 decimal places for prices
+        'DOTUSDT': 2,      // DOT: 2 decimal places for prices
+        'LINKUSDT': 2,     // LINK: 2 decimal places for prices
+        'UNIUSDT': 2,      // UNI: 2 decimal places for prices
+      };
+
+      pricePrecision = pricePrecisionMap[baseSymbol] || 2;
+
+      // Set appropriate tickSize based on precision
+      if (pricePrecision === 1) tickSize = 0.1;
+      else if (pricePrecision === 2) tickSize = 0.01;
+      else if (pricePrecision === 3) tickSize = 0.001;
+      else if (pricePrecision === 4) tickSize = 0.0001;
+      else if (pricePrecision === 5) tickSize = 0.00001;
     }
 
     // Convert to number if it's a string
@@ -388,7 +447,7 @@ export class BinanceService {
 
         // Log error details for debugging
         console.error(`API Error [${errorCode || 'UNKNOWN'}]: ${errorMessage}`);
-        
+
         // 处理时间同步错误 (-1021)
         if (errorCode === -1021) {
           console.warn('⏰ Timestamp error detected, syncing server time and retrying...');
@@ -410,7 +469,7 @@ export class BinanceService {
           const retryResponse = await this.client.request<T>(retryConfig);
           return retryResponse.data;
         }
-        
+
         if (errorCode === -2019) {
           console.error('💰 Margin insufficient - check available balance and existing positions');
         }
