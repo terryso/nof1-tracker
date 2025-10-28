@@ -208,12 +208,29 @@ export class BinanceService {
 
     // Round to nearest valid step size
     const stepSize = minQty; // Use minQty as step size for simplicity
-    const roundedQuantity = Math.floor(quantityNum / stepSize) * stepSize;
+
+    // Convert to integer arithmetic to avoid floating point precision issues
+    // For example: precision=2 means we multiply by 100 to work with integers
+    const factor = Math.pow(10, precision);
+
+    // Always round quantity down to avoid exceeding user's intended size
+    const quantityInSmallestUnit = Math.floor(quantityNum * factor + Number.EPSILON);
+
+    // Step size should stay aligned to the nearest integer unit (never zero)
+    const stepSizeInSmallestUnit = Math.max(1, Math.round(stepSize * factor));
+
+    // Perform integer division to get number of steps
+    const numberOfSteps = Math.floor(quantityInSmallestUnit / stepSizeInSmallestUnit);
+    const roundedQuantityInSmallestUnit = numberOfSteps * stepSizeInSmallestUnit;
+
+    // Convert back to decimal
+    const roundedQuantity = roundedQuantityInSmallestUnit / factor;
 
     // Ensure we don't go below minimum
     const finalQuantity = Math.max(roundedQuantity, minQty);
 
-    // Format to correct precision - keep trailing zeros for precision requirements
+    // Format to correct precision to avoid floating point errors
+    // toFixed returns string with exact decimal places, which Binance accepts
     const formattedQuantity = finalQuantity.toFixed(precision);
     return formattedQuantity;
   }
@@ -331,12 +348,10 @@ export class BinanceService {
         const errorData = error.response.data as any;
         const errorCode = errorData?.code;
         const errorMessage = errorData?.msg || errorData?.message || error.message;
-        const statusText = error.response.statusText;
-        const statusCode = error.response.status;
 
         // Log error details for debugging
         console.error(`API Error [${errorCode || 'UNKNOWN'}]: ${errorMessage}`);
-        
+
         // 处理时间同步错误 (-1021)
         if (errorCode === -1021) {
           console.warn('⏰ Timestamp error detected, syncing server time and retrying...');
@@ -390,8 +405,6 @@ export class BinanceService {
         const errorData = error.response.data as any;
         const errorCode = errorData?.code;
         const errorMessage = errorData?.msg || errorData?.message || error.message;
-        const statusText = error.response.statusText;
-        const statusCode = error.response.status;
 
         // Log error details for debugging
         console.error(`API Error [${errorCode || 'UNKNOWN'}]: ${errorMessage}`);
@@ -492,12 +505,13 @@ export class BinanceService {
     };
 
     // 如果使用 closePosition，则不需要 quantity
+    // NOTE: order.quantity is already formatted string from convertToBinanceOrder, no need to format again
     if (order.closePosition !== "true") {
-      params.quantity = this.formatQuantity(order.quantity, order.symbol);
+      params.quantity = order.quantity;
     }
 
-    if (order.price) params.price = this.formatPrice(order.price, order.symbol);
-    if (order.stopPrice) params.stopPrice = this.formatPrice(order.stopPrice, order.symbol);
+    if (order.price) params.price = order.price;
+    if (order.stopPrice) params.stopPrice = order.stopPrice;
     if (order.timeInForce) params.timeInForce = order.timeInForce;
     if (order.closePosition) params.closePosition = order.closePosition;
 
