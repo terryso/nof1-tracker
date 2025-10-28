@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import CryptoJS from 'crypto-js';
 import http from 'http';
 import https from 'https';
+import { logDebug, logInfo } from '../utils/logger';
 
 export interface BinanceOrder {
   symbol: string;
@@ -156,6 +157,52 @@ export class BinanceService {
   }
 
   /**
+   * Calculate precision from step size
+   * Uses logarithm to handle scientific notation and very small values
+   * @example stepSize = 0.001 -> precision = 3
+   * @example stepSize = 1e-6 -> precision = 6
+   * @example stepSize = 1 -> precision = 0
+   */
+  private calculatePrecision(stepSize: number): number {
+    if (stepSize >= 1) return 0;
+    return Math.abs(Math.floor(Math.log10(stepSize)));
+  }
+
+  /**
+   * Get LOT_SIZE filter from symbol info
+   */
+  private getLotSizeFilter(symbolInfo: any): any {
+    return symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+  }
+
+  /**
+   * Get PRICE_FILTER from symbol info
+   */
+  private getPriceFilter(symbolInfo: any): any {
+    return symbolInfo?.filters?.find((f: any) => f.filterType === 'PRICE_FILTER');
+  }
+
+  /**
+   * Round a value to the nearest step size
+   * @param value The value to round
+   * @param stepSize The step size to round to
+   * @returns The rounded value
+   */
+  private roundToStepSize(value: number, stepSize: number): number {
+    return Math.round(value / stepSize) * stepSize;
+  }
+
+  /**
+   * Floor a value to the nearest step size
+   * @param value The value to floor
+   * @param stepSize The step size to floor to
+   * @returns The floored value
+   */
+  private floorToStepSize(value: number, stepSize: number): number {
+    return Math.floor(value / stepSize) * stepSize;
+  }
+
+  /**
    * Get quantity and price precision from Binance API
    */
   private async getPrecisions(symbol: string): Promise<{ quantityPrecision: number; pricePrecision: number; minQty: number; stepSize: number }> {
@@ -163,24 +210,23 @@ export class BinanceService {
       const symbolInfo = await this.getSymbolInfo(symbol);
 
       // Get LOT_SIZE filter for quantity precision
-      const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+      const lotSizeFilter = this.getLotSizeFilter(symbolInfo);
       // Get PRICE_FILTER for price precision
-      const priceFilter = symbolInfo.filters.find((f: any) => f.filterType === 'PRICE_FILTER');
+      const priceFilter = this.getPriceFilter(symbolInfo);
+
+      if (!lotSizeFilter || !priceFilter) {
+        throw new Error('Required filters (LOT_SIZE or PRICE_FILTER) not found in symbol info');
+      }
 
       const minQty = parseFloat(lotSizeFilter.minQty || '0.001');
       const stepSize = parseFloat(lotSizeFilter.stepSize || '0.001');
 
       // Calculate precision from step size
-      // For example: stepSize = 0.001 -> precision = 3
-      const quantityPrecision = stepSize < 1
-        ? stepSize.toString().split('.')[1]?.length || 0
-        : 0;
+      const quantityPrecision = this.calculatePrecision(stepSize);
 
       // Get price precision from tickSize
       const tickSize = parseFloat(priceFilter.tickSize || '0.01');
-      const pricePrecision = tickSize < 1
-        ? tickSize.toString().split('.')[1]?.length || 2
-        : 0;
+      const pricePrecision = this.calculatePrecision(tickSize);
 
       return { quantityPrecision, pricePrecision, minQty, stepSize };
     } catch (error) {
@@ -213,7 +259,7 @@ export class BinanceService {
     }
 
     // Round down to nearest valid step size
-    const roundedQuantity = Math.floor(quantityNum / stepSize) * stepSize;
+    const roundedQuantity = this.floorToStepSize(quantityNum, stepSize);
 
     // Ensure we don't go below minimum
     const finalQuantity = Math.max(roundedQuantity, minQty);
@@ -237,14 +283,12 @@ export class BinanceService {
 
     if (this.symbolInfoCache.has(baseSymbol)) {
       const symbolInfo = this.symbolInfoCache.get(baseSymbol);
-      const lotSizeFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+      const lotSizeFilter = this.getLotSizeFilter(symbolInfo);
 
       if (lotSizeFilter) {
         minQty = parseFloat(lotSizeFilter.minQty || '0.001');
         stepSize = parseFloat(lotSizeFilter.stepSize || '0.001');
-        quantityPrecision = stepSize < 1
-          ? stepSize.toString().split('.')[1]?.length || 0
-          : 0;
+        quantityPrecision = this.calculatePrecision(stepSize);
       }
     } else {
       // Fallback to hardcoded precision and min quantity maps for backward compatibility
@@ -293,7 +337,7 @@ export class BinanceService {
     }
 
     // Round down to nearest valid step size
-    const roundedQuantity = Math.floor(quantityNum / stepSize) * stepSize;
+    const roundedQuantity = this.floorToStepSize(quantityNum, stepSize);
 
     // Ensure we don't go below minimum
     const finalQuantity = Math.max(roundedQuantity, minQty);
@@ -315,13 +359,11 @@ export class BinanceService {
 
     if (this.symbolInfoCache.has(baseSymbol)) {
       const symbolInfo = this.symbolInfoCache.get(baseSymbol);
-      const priceFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'PRICE_FILTER');
+      const priceFilter = this.getPriceFilter(symbolInfo);
 
       if (priceFilter) {
         tickSize = parseFloat(priceFilter.tickSize || '0.01');
-        pricePrecision = tickSize < 1
-          ? tickSize.toString().split('.')[1]?.length || 2
-          : 0;
+        pricePrecision = this.calculatePrecision(tickSize);
       }
     } else {
       // Fallback to hardcoded precision map for backward compatibility
@@ -353,7 +395,7 @@ export class BinanceService {
     const priceNum = typeof price === 'string' ? parseFloat(price) : price;
 
     // Round to nearest tick size
-    const roundedPrice = Math.round(priceNum / tickSize) * tickSize;
+    const roundedPrice = this.roundToStepSize(priceNum, tickSize);
 
     // Format to correct precision - keep trailing zeros for precision requirements
     const formattedPrice = roundedPrice.toFixed(pricePrecision);
@@ -380,7 +422,7 @@ export class BinanceService {
       const response = await this.client.get('/fapi/v1/time');
       const serverTime = response.data.serverTime;
       this.serverTimeOffset = serverTime - localTime;
-      console.log(`⏰ Server time synced. Offset: ${this.serverTimeOffset}ms`);
+      logInfo(`⏰ Server time synced. Offset: ${this.serverTimeOffset}ms`);
     } catch (error) {
       console.warn('⚠️ Failed to sync server time:', error instanceof Error ? error.message : 'Unknown error');
     }
@@ -600,7 +642,7 @@ export class BinanceService {
 
     // 确保符号信息已加载到缓存中（避免精度错误）
     if (!this.symbolInfoCache.has(baseSymbol)) {
-      console.log(`📥 Loading symbol info for ${baseSymbol}...`);
+      logDebug(`📥 Loading symbol info for ${baseSymbol}...`);
       await this.getSymbolInfo(baseSymbol);
     }
 
@@ -617,9 +659,9 @@ export class BinanceService {
 
       // 调试信息：显示格式化的数量
       const symbolInfo = this.symbolInfoCache.get(baseSymbol);
-      const lotSizeFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
-      console.log(`📊 Quantity formatting: ${order.quantity} -> ${formattedQuantity}`);
-      console.log(`   Step size: ${lotSizeFilter?.stepSize || 'N/A'}, Min Qty: ${lotSizeFilter?.minQty || 'N/A'}`);
+      const lotSizeFilter = this.getLotSizeFilter(symbolInfo);
+      logDebug(`📊 Quantity formatting: ${order.quantity} -> ${formattedQuantity}`);
+      logDebug(`   Step size: ${lotSizeFilter?.stepSize || 'N/A'}, Min Qty: ${lotSizeFilter?.minQty || 'N/A'}`);
     }
 
     if (order.price) params.price = this.formatPrice(order.price, order.symbol);
