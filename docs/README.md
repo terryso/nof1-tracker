@@ -36,6 +36,14 @@
   - 使用场景
   - 最佳实践
 
+- **[slack-integration.md](./slack-integration.md)** - Slack集成指南
+  - 如何创建Slack App
+  - OAuth Token获取方法
+  - 获取频道名称
+  - 添加机器人到频道
+  - 环境变量配置
+  - 测试和故障排除
+
 ### 🔄 开发文档
 - **[okx-integration-guide.md](./okx-integration-guide.md)** - OKX API 集成指南
   - 完整的集成架构设计
@@ -196,6 +204,12 @@ npm start -- follow gpt-5 --interval 30 --total-margin 2000 --price-tolerance 0.
 
 ## 🔄 版本历史
 
+### v2.1.0 (2025-01-XX)
+- ✨ 新增Slack集成支持
+- 📝 新增Slack配置文档
+- 🔧 环境变量名称修复 (SLACK_OAUTH_TOKEN, SLACK_CHANNEL_NAME)
+- 📚 完善集成指南
+
 ### v2.0.0 (2025-10-24)
 - ✨ 重构为模块化服务层架构
 - ✨ 新增订单去重机制
@@ -214,14 +228,14 @@ npm start -- follow gpt-5 --interval 30 --total-margin 2000 --price-tolerance 0.
 ## 📝 文档维护
 
 本文档中心由以下文件组成：
-- 6个核心文档文件
+- 7个核心文档文件
 - 1个重构总结文档
 - 完整的代码注释
-- 27个测试文件
+- 31个测试文件
 
-**最后更新**: 2025-10-24  
-**文档版本**: v2.0.0  
-**系统版本**: nof1-tracker v2.0.0
+**最后更新**: 2025-01-XX  
+**文档版本**: v2.1.0  
+**系统版本**: nof1-tracker v2.1.0
 
 ---
 

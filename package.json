@@ -27,6 +27,7 @@
   "author": "Nof1 Trading Team",
   "license": "MIT",
   "dependencies": {
+    "@slack/web-api": "^7.12.0",
     "@types/fs-extra": "^11.0.4",
     "axios": "^1.6.2",
     "commander": "^11.1.0",

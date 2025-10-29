@@ -1,5 +1,7 @@
 import { TradingPlan } from "../types/trading";
 import { TelegramService } from "./telegram-service";
+import { SlackService } from "./slack-service";
+import { MessageFormatService } from "../utils/message-format"
 import { BinanceService, StopLossOrder, TakeProfitOrder, OrderResponse } from "./binance-service";
 import { ConfigManager } from "./config-manager";
 
@@ -20,6 +22,7 @@ export class TradingExecutor {
   private binanceService: BinanceService;
   private testnet: boolean;
   private telegramService?: TelegramService;
+  private messageFormatService: MessageFormatService;
   private configManager: ConfigManager;
 
 
@@ -38,6 +41,7 @@ export class TradingExecutor {
     if (!configManager) {
       this.configManager.loadFromEnvironment();
     }
+    this.messageFormatService = new MessageFormatService();
   }
 
   /**
@@ -234,20 +238,27 @@ export class TradingExecutor {
       console.log(`   Price: ${orderResponse.avgPrice || 'Market'}`);
       console.log(`   Quantity: ${orderResponse.executedQty}`);
 
+      const formattedMessage = this.messageFormatService.formatTradeMessage({
+        symbol: orderResponse.symbol,
+        side: tradingPlan.side,
+        quantity: orderResponse.executedQty,
+        price: orderResponse.avgPrice || 'Market',
+        orderId: orderResponse.orderId.toString(),
+        status: orderResponse.status,
+        leverage: tradingPlan.leverage,
+        marginType: tradingPlan.marginType
+      });
+
       const telegramConfig = this.configManager.getConfig().telegram;
       if (telegramConfig.enabled) {
         const telegramService = new TelegramService(telegramConfig.token);
-        const formattedMessage = telegramService.formatTradeMessage({
-          symbol: orderResponse.symbol,
-          side: tradingPlan.side,
-          quantity: orderResponse.executedQty,
-          price: orderResponse.avgPrice || 'Market',
-          orderId: orderResponse.orderId.toString(),
-          status: orderResponse.status,
-          leverage: tradingPlan.leverage,
-          marginType: tradingPlan.marginType
-        });
         await telegramService.sendMessage(telegramConfig.chatId, formattedMessage);
+      }
+
+      const slackConfig = this.configManager.getConfig().slack;
+      if (slackConfig.enabled) {
+        const slackService = new SlackService(slackConfig.token);
+        await slackService.sendMessage(slackConfig.channel, formattedMessage)
       }
       
       return {
@@ -308,17 +319,26 @@ export class TradingExecutor {
             closePosition: "true"
           });
           takeProfitOrderId = tpOrderResponse.orderId.toString();
+
+          const tpMessage = this.messageFormatService.formatStopOrderMessage(
+            'take_profit',
+            stopOrders.takeProfitOrder!.symbol,
+            stopOrders.takeProfitOrder!.stopPrice.toString(),
+            takeProfitOrderId
+          );
+
           const telegramConfig = this.configManager.getConfig().telegram;
           if (telegramConfig.enabled) {
             const telegramService = new TelegramService(telegramConfig.token);
-            const tpMessage = telegramService.formatStopOrderMessage(
-              'take_profit',
-              stopOrders.takeProfitOrder!.symbol,
-              stopOrders.takeProfitOrder!.stopPrice.toString(),
-              takeProfitOrderId
-            );
             await telegramService.sendMessage(telegramConfig.chatId, tpMessage);
           }
+
+          const slackConfig = this.configManager.getConfig().slack;
+          if (slackConfig.enabled) {
+            const slackService = new SlackService(slackConfig.token);
+            await slackService.sendMessage(slackConfig.channel, tpMessage);
+          }
+          
           console.log(`✅ Take Profit order placed: ${takeProfitOrderId}`);
         } catch (tpError) {
           console.error(`❌ Failed to place Take Profit order: ${tpError instanceof Error ? tpError.message : 'Unknown error'}`);
@@ -341,25 +361,33 @@ export class TradingExecutor {
             closePosition: "true"
           });
           stopLossOrderId = slOrderResponse.orderId.toString();
-                      // Send Telegram notification for stop loss
+
+          const slMessage = this.messageFormatService.formatStopOrderMessage(
+            'stop_loss',
+            stopOrders.stopLossOrder!.symbol,
+            stopOrders.stopLossOrder!.stopPrice.toString(),
+            stopLossOrderId
+          );
+
+          // Send Telegram notification for stop loss
           const telegramConfig = this.configManager.getConfig().telegram;
           if (telegramConfig.enabled) {
             const telegramService = new TelegramService(telegramConfig.token);
-            const slMessage = telegramService.formatStopOrderMessage(
-              'stop_loss',
-              stopOrders.stopLossOrder!.symbol,
-              stopOrders.stopLossOrder!.stopPrice.toString(),
-              stopLossOrderId
-            );
             await telegramService.sendMessage(telegramConfig.chatId, slMessage);
           }
+
+          // Send Slack notification for stop loss
+          const slackConfig = this.configManager.getConfig().slack;
+          if (slackConfig.enabled) {
+            const slackService = new SlackService(slackConfig.token);
+            await slackService.sendMessage(slackConfig.channel, slMessage);
+          }
+
           console.log(`✅ Stop Loss order placed: ${stopLossOrderId}`);
         } catch (slError) {
           console.error(`❌ Failed to place Stop Loss order: ${slError instanceof Error ? slError.message : 'Unknown error'}`);
         }
       }
-
-      
 
       return {
         success: true,

@@ -1,14 +1,17 @@
 import { handleTelegramCommand } from '../../commands/telegram';
 import { ConfigManager } from '../../services/config-manager';
 import { TelegramService } from '../../services/telegram-service';
+import { MessageFormatService } from '../../utils/message-format';
 
 // Mock dependencies
 jest.mock('../../services/config-manager');
 jest.mock('../../services/telegram-service');
+jest.mock('../../utils/message-format');
 
 describe('Telegram Command Handler', () => {
   let mockConfigManager: jest.Mocked<ConfigManager>;
   let mockTelegramService: jest.Mocked<TelegramService>;
+  let mockMessageFormatService: jest.Mocked<MessageFormatService>;
   let consoleLogSpy: jest.SpyInstance;
   let consoleErrorSpy: jest.SpyInstance;
 
@@ -41,6 +44,13 @@ describe('Telegram Command Handler', () => {
     } as any;
 
     (TelegramService as jest.MockedClass<typeof TelegramService>).mockImplementation(() => mockTelegramService);
+
+    // Mock MessageFormatService
+    mockMessageFormatService = {
+      formatTradeMessage: jest.fn().mockReturnValue('Formatted test trade message'),
+    } as any;
+
+    (MessageFormatService as jest.MockedClass<typeof MessageFormatService>).mockImplementation(() => mockMessageFormatService);
   });
 
   afterEach(() => {
@@ -123,9 +133,10 @@ describe('Telegram Command Handler', () => {
       expect(ConfigManager).toHaveBeenCalled();
       expect(mockConfigManager.loadFromEnvironment).toHaveBeenCalled();
       expect(TelegramService).toHaveBeenCalledWith('test-token-123');
+      expect(MessageFormatService).toHaveBeenCalled();
       expect(mockTelegramService.sendMessage).toHaveBeenCalledWith(
         '123456789',
-        '🤖 Nof1 Tracker: This is a test message from your bot!'
+        'Formatted test trade message'
       );
       expect(consoleLogSpy).toHaveBeenCalledWith('✅ Test Telegram message sent successfully!');
     });
@@ -222,7 +233,7 @@ describe('Telegram Command Handler', () => {
 
       expect(mockTelegramService.sendMessage).toHaveBeenCalledWith(
         'chat123',
-        '🤖 Nof1 Tracker: This is a test message from your bot!'
+        'Formatted test trade message'
       );
     });
   });
