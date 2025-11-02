@@ -555,6 +555,7 @@ npm run lint
 - **[详细跟单策略文档](./docs/follow-strategy.md)** - 完整的跟单策略和风险评估
 - **[快速参考手册](./docs/quick-reference.md)** - 常用命令快速查询
 - **[自动重新跟单功能说明](./docs/auto-refollow-manual-close.md)** - 手工平仓检测和自动重新跟单详细说明
+- **[数据提供者抽象层](./docs/data-provider-abstraction.md)** - 如何切换到其他数据源（当 nof1 API 停用时）
 
 ## ⭐ Star History
 

@@ -76,8 +76,17 @@ export interface ApiResponse<T = any> {
 
 /**
  * NOF1 API 响应
+ * @deprecated 请使用 DataProviderResponse 代替
  */
 export interface Nof1Response {
+  accountTotals: AgentAccount[];
+}
+
+/**
+ * 数据提供者响应接口
+ * 统一的数据响应格式,不依赖具体的 API 实现
+ */
+export interface DataProviderResponse {
   accountTotals: AgentAccount[];
 }
 
