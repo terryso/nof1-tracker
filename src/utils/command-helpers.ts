@@ -15,7 +15,7 @@ export function initializeServices(includeOrderHistory = false): ServiceContaine
   return {
     analyzer,
     executor: new TradingExecutor(),
-    riskManager: new RiskManager(),
+    riskManager: new RiskManager(analyzer.getConfigManager()),
     // 使用 analyzer 内部的 orderHistoryManager 实例,确保一致性
     ...(includeOrderHistory && { orderHistoryManager: analyzer.getOrderHistoryManager() })
   };
