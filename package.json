@@ -36,6 +36,7 @@
     "fs-extra": "^11.3.2",
     "node-telegram-bot-api": "^0.66.0",
     "querystring": "^0.2.1",
+    "tracker-notification": "^1.0.0",
     "winston": "^3.11.0"
   },
   "devDependencies": {

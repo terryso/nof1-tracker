@@ -5,4 +5,3 @@ export { handleAgentsCommand } from './agents';
 export { handleFollowCommand } from './follow';
 export { handleStatusCommand } from './status';
 export { handleProfitCommand, ProfitCommandOptions } from './profit';
-export { handleTelegramCommand } from './telegram';

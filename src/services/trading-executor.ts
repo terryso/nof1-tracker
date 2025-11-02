@@ -1,7 +1,8 @@
 import { TradingPlan } from "../types/trading";
-import { TelegramService } from "./telegram-service";
 import { BinanceService, StopLossOrder, TakeProfitOrder, OrderResponse } from "./binance-service";
 import { ConfigManager } from "./config-manager";
+import { TradeNotificationData, StopOrderData } from "tracker-notification";
+import SendNotification from "../utils/notification-service";
 
 export interface ExecutionResult {
   success: boolean;
@@ -19,8 +20,6 @@ export interface StopOrderExecutionResult extends ExecutionResult {
 export class TradingExecutor {
   private binanceService: BinanceService;
   private testnet: boolean;
-  private telegramService?: TelegramService;
-  private configManager: ConfigManager;
 
 
   constructor(apiKey?: string, apiSecret?: string, testnet?: boolean, configManager?: ConfigManager) {
@@ -34,10 +33,6 @@ export class TradingExecutor {
       apiSecret || process.env.BINANCE_API_SECRET || "",
       testnet
     );
-    this.configManager = configManager || new ConfigManager();
-    if (!configManager) {
-      this.configManager.loadFromEnvironment();
-    }
   }
 
   /**
@@ -233,23 +228,20 @@ export class TradingExecutor {
       console.log(`   Status: ${orderResponse.status}`);
       console.log(`   Price: ${orderResponse.avgPrice || 'Market'}`);
       console.log(`   Quantity: ${orderResponse.executedQty}`);
-
-      const telegramConfig = this.configManager.getConfig().telegram;
-      if (telegramConfig.enabled) {
-        const telegramService = new TelegramService(telegramConfig.token);
-        const formattedMessage = telegramService.formatTradeMessage({
-          symbol: orderResponse.symbol,
-          side: tradingPlan.side,
-          quantity: orderResponse.executedQty,
-          price: orderResponse.avgPrice || 'Market',
-          orderId: orderResponse.orderId.toString(),
-          status: orderResponse.status,
-          leverage: tradingPlan.leverage,
-          marginType: tradingPlan.marginType
-        });
-        await telegramService.sendMessage(telegramConfig.chatId, formattedMessage);
-      }
       
+      const tradeNotificationData: TradeNotificationData = {
+        symbol: orderResponse.symbol,
+        side: tradingPlan.side,
+        quantity: orderResponse.executedQty,
+        price: orderResponse.avgPrice || 'Market',
+        orderId: orderResponse.orderId.toString(),
+        status: orderResponse.status,
+        leverage: tradingPlan.leverage,
+        marginType: tradingPlan.marginType
+      };
+
+      await SendNotification('trade', tradeNotificationData);
+
       return {
         success: true,
         orderId: orderResponse.orderId.toString()
@@ -308,17 +300,13 @@ export class TradingExecutor {
             closePosition: "true"
           });
           takeProfitOrderId = tpOrderResponse.orderId.toString();
-          const telegramConfig = this.configManager.getConfig().telegram;
-          if (telegramConfig.enabled) {
-            const telegramService = new TelegramService(telegramConfig.token);
-            const tpMessage = telegramService.formatStopOrderMessage(
-              'take_profit',
-              stopOrders.takeProfitOrder!.symbol,
-              stopOrders.takeProfitOrder!.stopPrice.toString(),
-              takeProfitOrderId
-            );
-            await telegramService.sendMessage(telegramConfig.chatId, tpMessage);
-          }
+          const stopOrderData: StopOrderData = {
+            type: 'take_profit',
+            symbol: stopOrders.takeProfitOrder!.symbol,
+            price: stopOrders.takeProfitOrder!.stopPrice.toString(),
+            orderId: takeProfitOrderId
+          };
+          await SendNotification('stop_order', stopOrderData);
           console.log(`✅ Take Profit order placed: ${takeProfitOrderId}`);
         } catch (tpError) {
           console.error(`❌ Failed to place Take Profit order: ${tpError instanceof Error ? tpError.message : 'Unknown error'}`);
@@ -341,18 +329,13 @@ export class TradingExecutor {
             closePosition: "true"
           });
           stopLossOrderId = slOrderResponse.orderId.toString();
-                      // Send Telegram notification for stop loss
-          const telegramConfig = this.configManager.getConfig().telegram;
-          if (telegramConfig.enabled) {
-            const telegramService = new TelegramService(telegramConfig.token);
-            const slMessage = telegramService.formatStopOrderMessage(
-              'stop_loss',
-              stopOrders.stopLossOrder!.symbol,
-              stopOrders.stopLossOrder!.stopPrice.toString(),
-              stopLossOrderId
-            );
-            await telegramService.sendMessage(telegramConfig.chatId, slMessage);
-          }
+          const stopOrderData: StopOrderData = {
+            type: 'stop_loss',
+            symbol: stopOrders.stopLossOrder!.symbol,
+            price: stopOrders.stopLossOrder!.stopPrice.toString(),
+            orderId: stopLossOrderId
+          };
+          await SendNotification('stop_order', stopOrderData);
           console.log(`✅ Stop Loss order placed: ${stopLossOrderId}`);
         } catch (slError) {
           console.error(`❌ Failed to place Stop Loss order: ${slError instanceof Error ? slError.message : 'Unknown error'}`);
