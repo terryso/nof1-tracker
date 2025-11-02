@@ -3,9 +3,6 @@ import {
   Position,
   AgentAccount,
   FollowPlan,
-  Nof1Response,
-  PositionOperationResult,
-  EnvironmentConfig,
   FollowOptions
 } from "../types/api";
 import { ConfigManager } from "../services/config-manager";
