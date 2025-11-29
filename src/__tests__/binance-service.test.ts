@@ -5,6 +5,10 @@ import {
   TakeProfitOrder
 } from "../services/binance-service";
 import { TradingPlan } from "../types/trading";
+import axios from 'axios';
+
+// Mock axios
+jest.mock('axios');
 
 // Mock crypto for signature generation
 jest.mock("crypto", () => ({
@@ -16,8 +20,18 @@ jest.mock("crypto", () => ({
 
 describe("BinanceService", () => {
   let service: BinanceService;
+  let mockAxiosInstance: any;
 
   beforeEach(() => {
+    // Mock axios.create to return a mock instance
+    mockAxiosInstance = {
+      request: jest.fn(),
+      get: jest.fn().mockResolvedValue({ data: { serverTime: Date.now() } })
+    };
+
+    (axios.create as jest.Mock) = jest.fn(() => mockAxiosInstance);
+    (axios.isAxiosError as unknown as jest.Mock) = jest.fn(() => false);
+
     service = new BinanceService("test-api-key", "test-api-secret");
   });
 
@@ -29,6 +43,7 @@ describe("BinanceService", () => {
 
   describe("constructor", () => {
     it("should create BinanceService instance with API credentials", () => {
+      // mockAxiosInstance is already set up in outer beforeEach
       const testService = new BinanceService("test-api-key", "test-api-secret");
       expect(testService).toBeInstanceOf(BinanceService);
       testService.destroy();
@@ -108,7 +123,7 @@ describe("BinanceService", () => {
 
       const binanceOrder = service.convertToBinanceOrder(tradingPlan);
 
-      expect(binanceOrder.quantity).toBe("10.000"); // SHIB最小数量是10
+      expect(binanceOrder.quantity).toBe("10"); // DOGEUSDT最小数量是10, precision 0
     });
 
     it("should handle very small quantities", () => {
@@ -719,23 +734,6 @@ describe("BinanceService", () => {
 
   // New API method coverage tests
   describe("API Method Coverage", () => {
-    let mockAxios: any;
-
-    beforeEach(() => {
-      // Mock axios for API tests
-      mockAxios = {
-        create: jest.fn(() => ({
-          request: jest.fn(),
-          get: jest.fn()
-        }))
-      };
-
-      // Mock axios module
-      const axios = require('axios');
-      axios.create = mockAxios.create;
-      axios.isAxiosError = jest.fn(() => false);
-    });
-
     it("should have getServerTime method", () => {
       expect(typeof service.getServerTime).toBe('function');
     });
@@ -782,16 +780,20 @@ describe("BinanceService", () => {
 
       expect(mainnetService).toBeDefined();
       expect(testnetService).toBeDefined();
+      mainnetService.destroy();
+      testnetService.destroy();
     });
 
     it("should handle constructor with null credentials", () => {
       const nullService = new BinanceService(null as any, null as any, false);
       expect(nullService).toBeDefined();
+      nullService.destroy();
     });
 
     it("should handle constructor with undefined credentials", () => {
       const undefService = new BinanceService(undefined as any, undefined as any, false);
       expect(undefService).toBeDefined();
+      undefService.destroy();
     });
 
     // Price formatting tests
@@ -828,6 +830,478 @@ describe("BinanceService", () => {
         expect(service.formatPrice(3682.104, "ETH")).toBe("3682.10");
         expect(service.formatPrice(1200.567, "BNB")).toBe("1200.57");
         expect(service.formatPrice(43210.987, "BTC")).toBe("43211.0");
+      });
+    });
+
+    describe("Dynamic Precision and Fallback Mechanism", () => {
+      describe("formatPrice fallback behavior", () => {
+        it("should use hardcoded precision for BTCUSDT when cache is empty", () => {
+          // BTC should use 1 decimal place from fallback
+          const result = service.formatPrice(45000.123, "BTC");
+          expect(result).toBe("45000.1");
+        });
+
+        it("should use hardcoded precision for ETHUSDT when cache is empty", () => {
+          // ETH should use 2 decimal places from fallback
+          const result = service.formatPrice(3000.456, "ETH");
+          expect(result).toBe("3000.46");
+        });
+
+        it("should use hardcoded precision for BNBUSDT when cache is empty", () => {
+          // BNB should use 2 decimal places from fallback
+          const result = service.formatPrice(500.789, "BNB");
+          expect(result).toBe("500.79");
+        });
+
+        it("should use default precision for unknown symbols", () => {
+          // Unknown symbol should default to 2 decimal places
+          const result = service.formatPrice(12345.6789, "UNKNOWNUSDT");
+          expect(result).toBe("12345.68");
+        });
+      });
+
+      describe("formatQuantity fallback behavior", () => {
+        it("should use hardcoded precision for BTCUSDT when cache is empty", () => {
+          // BTC should use 3 decimal places from fallback
+          const result = service.formatQuantity(0.123456, "BTC");
+          expect(result).toBe("0.123");
+        });
+
+        it("should use hardcoded min quantity for BTCUSDT when cache is empty", () => {
+          // BTC min quantity is 0.001
+          const result = service.formatQuantity(0.0005, "BTC");
+          expect(result).toBe("0.001");
+        });
+
+        it("should use hardcoded precision for BNBUSDT when cache is empty", () => {
+          // BNB should use 2 decimal places from fallback
+          const result = service.formatQuantity(0.123456, "BNB");
+          expect(result).toBe("0.12");
+        });
+
+        it("should use hardcoded min quantity for BNBUSDT when cache is empty", () => {
+          // BNB min quantity is 0.01
+          const result = service.formatQuantity(0.005, "BNB");
+          expect(result).toBe("0.01");
+        });
+
+        it("should handle DOGEUSDT with zero precision", () => {
+          // DOGE should use 0 decimal places (whole numbers only) and stepSize of 10
+          const result = service.formatQuantity(123.456, "DOGE");
+          expect(result).toBe("120"); // Round down to nearest 10
+        });
+
+        it("should use DOGEUSDT min quantity of 10", () => {
+          // DOGE min quantity is 10
+          const result = service.formatQuantity(5, "DOGE");
+          expect(result).toBe("10");
+        });
+
+        it("should use default precision for unknown symbols", () => {
+          // Unknown symbol should default to 3 decimal places
+          const result = service.formatQuantity(0.123456, "UNKNOWNUSDT");
+          expect(result).toBe("0.123");
+        });
+      });
+
+      describe("Fallback behavior for edge cases", () => {
+        it("should handle very small prices correctly", () => {
+          // Test with SHIB (default fallback to 2 decimal places)
+          const result = service.formatPrice(0.00001234, "SHIB");
+          expect(result).toBe("0.00");
+        });
+
+        it("should handle very large prices correctly", () => {
+          // Test with BTC (1 decimal place)
+          const result = service.formatPrice(99999.999, "BTC");
+          expect(result).toBe("100000.0");
+        });
+
+        it("should round quantity down to valid step size", () => {
+          // BTC with stepSize 0.001, should round down
+          const result = service.formatQuantity(0.1239, "BTC");
+          expect(result).toBe("0.123");
+        });
+
+        it("should ensure quantity meets minimum requirement", () => {
+          // BNB quantity below 0.01 should return 0.01
+          const result = service.formatQuantity(0.001, "BNB");
+          expect(result).toBe("0.01");
+        });
+      });
+
+      describe("Consistency between cached and fallback values", () => {
+        it("should produce same results for known symbols with or without cache", () => {
+          // Test that fallback produces consistent results
+          const price1 = service.formatPrice(43210.987, "BTC");
+          const price2 = service.formatPrice(43210.987, "BTC");
+          expect(price1).toBe(price2);
+          expect(price1).toBe("43211.0");
+        });
+
+        it("should handle zero quantity with correct min quantity", () => {
+          // DOGEUSDT with quantity 0 should return min quantity
+          const result = service.formatQuantity(0, "DOGE");
+          expect(result).toBe("10");
+        });
+      });
+    });
+
+    describe("formatQuantityAsync - Dynamic Precision from API", () => {
+      beforeEach(() => {
+        // Mock getSymbolInfo to return symbol information
+        jest.spyOn(service, 'getSymbolInfo').mockImplementation(async (symbol: string) => {
+          const mockSymbolInfo: any = {
+            symbol,
+            filters: [
+              {
+                filterType: 'LOT_SIZE',
+                minQty: '0.001',
+                stepSize: '0.001'
+              },
+              {
+                filterType: 'PRICE_FILTER',
+                tickSize: '0.01'
+              }
+            ]
+          };
+          return mockSymbolInfo;
+        });
+      });
+
+      it("should format quantity using API precision for BTCUSDT", async () => {
+        const result = await service.formatQuantityAsync(0.123456, "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should use minimum quantity when quantity is too small", async () => {
+        const result = await service.formatQuantityAsync(0.0005, "BTC");
+        expect(result).toBe("0.001");
+      });
+
+      it("should round down to nearest step size", async () => {
+        const result = await service.formatQuantityAsync(0.1239, "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should handle different step sizes correctly", async () => {
+        // Mock BNB with different step size
+        (service.getSymbolInfo as jest.Mock).mockImplementation(async (symbol: string) => {
+          if (symbol === 'BNBUSDT') {
+            return {
+              symbol,
+              filters: [
+                { filterType: 'LOT_SIZE', minQty: '0.01', stepSize: '0.01' },
+                { filterType: 'PRICE_FILTER', tickSize: '0.01' }
+              ]
+            };
+          }
+          return {
+            symbol,
+            filters: [
+              { filterType: 'LOT_SIZE', minQty: '0.001', stepSize: '0.001' },
+              { filterType: 'PRICE_FILTER', tickSize: '0.01' }
+            ]
+          };
+        });
+
+        const result = await service.formatQuantityAsync(0.123, "BNB");
+        expect(result).toBe("0.12");
+      });
+
+      it("should fall back to defaults when getSymbolInfo fails", async () => {
+        // Mock getSymbolInfo to fail
+        (service.getSymbolInfo as jest.Mock).mockRejectedValueOnce(new Error('API Error'));
+
+        // Should use default values when API fails
+        const result = await service.formatQuantityAsync(0.123, "BTC");
+        expect(result).toBe("0.123"); // Uses default fallback from getPrecisions
+      });
+
+      it("should handle string quantity input", async () => {
+        const result = await service.formatQuantityAsync("0.123456", "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should preserve precision from API specifications", async () => {
+        // Mock SHIB with specific precision
+        (service.getSymbolInfo as jest.Mock).mockImplementation(async (symbol: string) => {
+          if (symbol === 'SHIBUSDT') {
+            return {
+              symbol,
+              filters: [
+                { filterType: 'LOT_SIZE', minQty: '1000', stepSize: '1000' },
+                { filterType: 'PRICE_FILTER', tickSize: '0.00001' }
+              ]
+            };
+          }
+          return {
+            symbol,
+            filters: [
+              { filterType: 'LOT_SIZE', minQty: '0.001', stepSize: '0.001' },
+              { filterType: 'PRICE_FILTER', tickSize: '0.01' }
+            ]
+          };
+        });
+
+        const result = await service.formatQuantityAsync(5000, "SHIB");
+        expect(result).toBe("5000"); // Math.floor(5000/1000)*1000 = 5000
+
+        // Test actual round-down behavior
+        const result2 = await service.formatQuantityAsync(5500, "SHIB");
+        expect(result2).toBe("5000"); // Math.floor(5500/1000)*1000 = 5000
+      });
+    });
+
+    describe("Cache-based precision with API data", () => {
+      beforeEach(() => {
+        // Add symbol info to cache
+        const symbolInfo: any = {
+          symbol: 'BTCUSDT',
+          filters: [
+            {
+              filterType: 'LOT_SIZE',
+              minQty: '0.001',
+              stepSize: '0.001'
+            },
+            {
+              filterType: 'PRICE_FILTER',
+              tickSize: '0.1'
+            }
+          ]
+        };
+        (service as any).symbolInfoCache.set('BTCUSDT', symbolInfo);
+      });
+
+      it("should use cached symbol info when available", () => {
+        const result = service.formatQuantity(0.123456, "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should use cached price info when available", () => {
+        const result = service.formatPrice(43210.987, "BTC");
+        // tickSize = 0.1, so 43210.987 rounds to 43211.0
+        expect(result).toBe("43211.0");
+      });
+
+      it("should handle cached data with different step sizes", () => {
+        // Update cache with different step size
+        const symbolInfo: any = {
+          symbol: 'BNBUSDT',
+          filters: [
+            {
+              filterType: 'LOT_SIZE',
+              minQty: '0.01',
+              stepSize: '0.01'
+            },
+            {
+              filterType: 'PRICE_FILTER',
+              tickSize: '0.01'
+            }
+          ]
+        };
+        (service as any).symbolInfoCache.set('BNBUSDT', symbolInfo);
+
+        const result = service.formatQuantity(0.123, "BNB");
+        expect(result).toBe("0.12");
+      });
+
+      it("should handle zero quantity with cached min quantity", () => {
+        const result = service.formatQuantity(0, "BTC");
+        expect(result).toBe("0.001");
+      });
+
+      it("should handle very large quantities with cached precision", () => {
+        const result = service.formatQuantity(1000.9876, "BTC");
+        expect(result).toBe("1000.987");
+      });
+
+      it("should handle prices with cached tick size", () => {
+        // BTC has tickSize 0.1 in cache
+        const result = service.formatPrice(43210.987, "BTC");
+        // tickSize = 0.1, so 43210.987 rounds to 43211.0
+        expect(result).toBe("43211.0");
+      });
+
+      it("should fallback when cache is empty", () => {
+        (service as any).symbolInfoCache.clear();
+
+        const result = service.formatQuantity(0.123456, "UNKNOWN");
+        expect(result).toBe("0.123"); // Uses fallback
+      });
+    });
+  });
+
+  describe("Private Helper Methods", () => {
+    describe("calculatePrecision", () => {
+      it("should calculate precision correctly for decimal values", () => {
+        const precision = (service as any).calculatePrecision(0.001);
+        expect(precision).toBe(3);
+      });
+
+      it("should handle very small step sizes (scientific notation)", () => {
+        const precision = (service as any).calculatePrecision(1e-6);
+        expect(precision).toBe(6);
+      });
+
+      it("should return 0 for stepSize >= 1", () => {
+        expect((service as any).calculatePrecision(1)).toBe(0);
+        expect((service as any).calculatePrecision(10)).toBe(0);
+        expect((service as any).calculatePrecision(100.5)).toBe(0);
+      });
+
+      it("should handle various decimal precisions", () => {
+        expect((service as any).calculatePrecision(0.1)).toBe(1);
+        expect((service as any).calculatePrecision(0.01)).toBe(2);
+        expect((service as any).calculatePrecision(0.0001)).toBe(4);
+        expect((service as any).calculatePrecision(0.00001)).toBe(5);
+      });
+    });
+
+    describe("getLotSizeFilter", () => {
+      it("should extract LOT_SIZE filter from symbol info", () => {
+        const symbolInfo = {
+          symbol: "BTCUSDT",
+          filters: [
+            { filterType: "LOT_SIZE", minQty: "0.001", stepSize: "0.001" },
+            { filterType: "PRICE_FILTER", tickSize: "0.1" }
+          ]
+        };
+
+        const filter = (service as any).getLotSizeFilter(symbolInfo);
+        expect(filter).toBeDefined();
+        expect(filter.filterType).toBe("LOT_SIZE");
+        expect(filter.minQty).toBe("0.001");
+      });
+
+      it("should return undefined when LOT_SIZE filter not found", () => {
+        const symbolInfo = {
+          symbol: "BTCUSDT",
+          filters: [{ filterType: "PRICE_FILTER", tickSize: "0.1" }]
+        };
+
+        const filter = (service as any).getLotSizeFilter(symbolInfo);
+        expect(filter).toBeUndefined();
+      });
+
+      it("should handle null/undefined symbolInfo safely", () => {
+        expect((service as any).getLotSizeFilter(null)).toBeUndefined();
+        expect((service as any).getLotSizeFilter(undefined)).toBeUndefined();
+        expect((service as any).getLotSizeFilter({})).toBeUndefined();
+      });
+    });
+
+    describe("getPriceFilter", () => {
+      it("should extract PRICE_FILTER from symbol info", () => {
+        const symbolInfo = {
+          symbol: "BTCUSDT",
+          filters: [
+            { filterType: "LOT_SIZE", minQty: "0.001", stepSize: "0.001" },
+            { filterType: "PRICE_FILTER", tickSize: "0.1" }
+          ]
+        };
+
+        const filter = (service as any).getPriceFilter(symbolInfo);
+        expect(filter).toBeDefined();
+        expect(filter.filterType).toBe("PRICE_FILTER");
+        expect(filter.tickSize).toBe("0.1");
+      });
+
+      it("should return undefined when PRICE_FILTER not found", () => {
+        const symbolInfo = {
+          symbol: "BTCUSDT",
+          filters: [{ filterType: "LOT_SIZE", minQty: "0.001", stepSize: "0.001" }]
+        };
+
+        const filter = (service as any).getPriceFilter(symbolInfo);
+        expect(filter).toBeUndefined();
+      });
+
+      it("should handle null/undefined symbolInfo safely", () => {
+        expect((service as any).getPriceFilter(null)).toBeUndefined();
+        expect((service as any).getPriceFilter(undefined)).toBeUndefined();
+        expect((service as any).getPriceFilter({})).toBeUndefined();
+      });
+    });
+
+    describe("roundToStepSize", () => {
+      it("should round to nearest step size correctly", () => {
+        const result = (service as any).roundToStepSize(10.123, 0.01);
+        expect(result).toBeCloseTo(10.12, 10);
+      });
+
+      it("should round down correctly", () => {
+        const result = (service as any).roundToStepSize(10.125, 0.01);
+        expect(result).toBeCloseTo(10.13, 10);
+      });
+
+      it("should handle large step sizes", () => {
+        const result = (service as any).roundToStepSize(12345, 1000);
+        expect(result).toBe(12000);
+      });
+
+      it("should handle small step sizes", () => {
+        const result = (service as any).roundToStepSize(0.1239, 0.001);
+        expect(result).toBe(0.124);
+      });
+
+      it("should handle exact multiples", () => {
+        const result = (service as any).roundToStepSize(100, 10);
+        expect(result).toBe(100);
+      });
+    });
+
+    describe("floorToStepSize", () => {
+      it("should floor to nearest step size correctly", () => {
+        const result = (service as any).floorToStepSize(10.123, 0.01);
+        expect(result).toBeCloseTo(10.12, 10);
+      });
+
+      it("should always floor down", () => {
+        const result = (service as any).floorToStepSize(10.129, 0.01);
+        expect(result).toBeCloseTo(10.12, 10);
+      });
+
+      it("should handle large step sizes", () => {
+        const result = (service as any).floorToStepSize(12345, 1000);
+        expect(result).toBe(12000);
+      });
+
+      it("should handle small step sizes", () => {
+        const result = (service as any).floorToStepSize(0.1239, 0.001);
+        expect(result).toBe(0.123);
+      });
+
+      it("should handle exact multiples", () => {
+        const result = (service as any).floorToStepSize(100, 10);
+        expect(result).toBe(100);
+      });
+
+      it("should work correctly with BTC stepSize", () => {
+        const result = (service as any).floorToStepSize(0.1239, 0.001);
+        expect(result).toBe(0.123);
+      });
+    });
+
+    describe("Integration: Helper methods with public methods", () => {
+      it("should use calculatePrecision in formatQuantity", () => {
+        const result = service.formatQuantity(0.12345, "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should use floorToStepSize in formatQuantity", () => {
+        const result = service.formatQuantity(0.1239, "BTC");
+        expect(result).toBe("0.123");
+      });
+
+      it("should use calculatePrecision in formatPrice", () => {
+        const result = service.formatPrice(43210.987, "BTC");
+        expect(result).toBe("43211.0");
+      });
+
+      it("should use roundToStepSize in formatPrice", () => {
+        const result = service.formatPrice(43210.987, "BTC");
+        expect(result).toBe("43211.0");
       });
     });
   });

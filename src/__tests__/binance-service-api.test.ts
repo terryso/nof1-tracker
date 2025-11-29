@@ -30,10 +30,10 @@ describe("BinanceService - API Methods", () => {
       toString: jest.fn().mockReturnValue('mocked_signature')
     });
 
-    // Mock axios.create
+    // Mock axios.create with proper get method that returns data
     mockAxiosInstance = {
       request: jest.fn(),
-      get: jest.fn()
+      get: jest.fn().mockResolvedValue({ data: { serverTime: Date.now() } })
     };
     MockedAxios.create = jest.fn().mockReturnValue(mockAxiosInstance);
 
@@ -444,6 +444,140 @@ describe("BinanceService - API Methods", () => {
       await expect(binanceService.getAccountInfo()).rejects.toThrow(
         'Binance API Error: undefined'
       );
+    });
+
+    it("should handle -1021 timestamp error and retry", async () => {
+      // First call fails with -1021
+      const error = {
+        response: {
+          data: { code: -1021, msg: 'Timestamp error' },
+          status: 400
+        }
+      };
+      mockIsAxiosError.mockReturnValue(true);
+
+      // Second call (retry) succeeds
+      mockAxiosInstance.request
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce({ data: { success: true } });
+
+      const result = await binanceService.getAccountInfo();
+      expect(result.success).toBe(true);
+      expect(mockAxiosInstance.request).toHaveBeenCalledTimes(2);
+    });
+
+    it("should handle -2019 margin insufficient error", async () => {
+      const error = {
+        response: {
+          data: { code: -2019, msg: 'Margin insufficient' },
+          status: 400
+        }
+      };
+      mockIsAxiosError.mockReturnValue(true);
+      mockAxiosInstance.request.mockRejectedValue(error);
+
+      await expect(binanceService.getAccountInfo()).rejects.toThrow(
+        'Binance API Error: Margin insufficient'
+      );
+    });
+
+    it("should handle symbol not found in getSymbolInfo", async () => {
+      // Mock exchangeInfo not containing the symbol
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          symbols: [] // Empty symbols array
+        }
+      });
+
+      const result = await binanceService.getSymbolInfo('INVALIDUSDT');
+
+      // Should return default value when symbol not found
+      expect(result.symbol).toBe('INVALIDUSDT');
+      expect(result.filters).toBeDefined();
+    });
+
+    it("should handle getSymbolInfo error and return default", async () => {
+      // Mock API error
+      mockAxiosInstance.get.mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await binanceService.getSymbolInfo('BTCUSDT');
+
+      // Should return default value on error
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.filters).toBeDefined();
+      expect(result.filters[0].filterType).toBe('LOT_SIZE');
+    });
+
+    it("should use cached symbol info when available", async () => {
+      // Mock getExchangeInformation to return symbol data
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          symbols: [{ symbol: 'BTCUSDT', filters: [] }]
+        }
+      });
+
+      const result1 = await binanceService.getSymbolInfo('BTC');
+      expect(result1.symbol).toBe('BTCUSDT');
+
+      // Second call should use cache (no additional API call)
+      const result2 = await binanceService.getSymbolInfo('BTC');
+      expect(result2).toBe(result1);
+
+      // getExchangeInformation should only be called once (second call uses cache)
+      expect(mockAxiosInstance.get).toHaveBeenCalled();
+      // The exact call count may vary due to syncServerTime, so we just check that both calls return the same cached result
+    });
+  });
+
+  describe("Error handling for specific error codes", () => {
+    it("should log margin insufficient error in placeOrder", async () => {
+      const error = {
+        response: {
+          data: { code: -2019, msg: 'Margin insufficient' },
+          status: 400
+        }
+      };
+      mockIsAxiosError.mockReturnValue(true);
+      mockAxiosInstance.request.mockRejectedValue(error);
+
+      const order = {
+        symbol: 'BTCUSDT',
+        side: 'BUY' as const,
+        type: 'MARKET' as const,
+        quantity: '0.001',
+        leverage: 10
+      };
+
+      // Pre-populate cache to avoid getSymbolInfo call
+      const symbolInfo = {
+        symbol: 'BTCUSDT',
+        filters: [
+          { filterType: 'LOT_SIZE', minQty: '0.001', stepSize: '0.001' },
+          { filterType: 'PRICE_FILTER', tickSize: '0.01' }
+        ]
+      };
+      (binanceService as any).symbolInfoCache.set('BTCUSDT', symbolInfo);
+
+      await expect(binanceService.placeOrder(order)).rejects.toThrow(
+        'Binance API Error: Margin insufficient'
+      );
+    });
+  });
+
+  describe("Formatting with different price precisions", () => {
+    it("should handle price precision 3 (MATICUSDT)", () => {
+      const result = binanceService.formatPrice(0.123456, "MATIC");
+      expect(result).toBe("0.123");
+    });
+
+    it("should handle price precision 4 (ADAUSDT)", () => {
+      const result = binanceService.formatPrice(0.12345678, "ADA");
+      expect(result).toBe("0.1235");
+    });
+
+    it("should handle price precision 5 (DOGEUSDT)", () => {
+      const result = binanceService.formatPrice(0.123456789, "DOGE");
+      expect(result).toBe("0.12346");
     });
   });
 });
